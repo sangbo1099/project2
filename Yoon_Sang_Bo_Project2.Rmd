@@ -1,0 +1,189 @@
+---
+title: "Project 2"
+author: "Sang Bo Yoon"
+date: "2025-11-11"
+output: 
+  word_document: 
+    toc: true
+---
+
+```{r setup, warning = FALSE, message = FALSE, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(tidyverse)
+```
+
+```{r}
+# Data cleaning
+
+clean_data <- function(file_path){
+  # Import dataset
+  data <- read_csv(file_path)
+  
+  # Rename variables
+  names(data)[c(2, 4, 6)] <- c("max_CO", "mean_PM2.5", "max_O3")
+  
+  data <- data %>%
+    # Leave out unit columns
+    select(Date, max_CO,
+           mean_PM2.5, max_O3) %>%
+    
+    # Convert character str to dates
+    mutate(Date =
+             as.Date(Date,
+                     format = "%m/%d/%Y")) %>%
+    
+    # Average multiple measurements
+    group_by(Date) %>%
+    mutate(
+      max_CO = mean(max_CO, na.rm = TRUE),
+      mean_PM2.5 = mean(mean_PM2.5, na.rm = TRUE),
+      max_O3 = mean(max_O3, na.rm = TRUE)) %>%
+    ungroup()
+
+  # Remove duplicates
+  data <- distinct(data)
+  
+  # Fix negative values to 0
+  for (col in c(2:4)){
+    data[[col]] <- if_else(data[[col]] < 0,
+                           0, data[[col]])
+  }
+  
+  return(data)
+}
+```
+
+```{r}
+# Run function on all datasets and save results
+AQ_2018 <- clean_data("data/AQ_2018.csv")
+AQ_2019 <- clean_data("data/AQ_2019.csv")
+AQ_2020 <- clean_data("data/AQ_2020.csv")
+```
+
+## CO & O3 Plot
+
+```{r}
+# Preparing data to make plots
+
+combined_AQ <- rbind(AQ_2018, AQ_2019, AQ_2020) # Combine datasets
+
+month_year_summary <- combined_AQ %>%
+  mutate(month = month(Date, label = TRUE,
+                       abbr = TRUE), # Add abbreviated month column
+         year = format(Date, "%Y")) # Add year column
+```
+
+```{r}
+# Creating separate dataset for easier data manipulation of first plot
+
+CO_O3_summary <- month_year_summary %>%
+  
+  # Only select CO and O3 data
+  select(Date, month, year, max_CO, max_O3) %>%
+  
+  # For each date create two entries separate for each pollutant
+  pivot_longer(
+    cols = c(max_CO, max_O3),
+    names_to = "Pollutant",
+    values_to = "Concentration"
+  )
+
+CO_O3_graph_data <- CO_O3_summary %>%
+  group_by(month, Pollutant) %>% # Group by month and pollutant
+  summarise(mean =
+              mean(Concentration,
+                   na.rm = TRUE), # Find monthly averages averaged over 3 years
+            se = sd(Concentration, na.rm = TRUE) /
+              sqrt(sum(!is.na(Concentration)))) %>% # Calculate standard error
+  mutate(LB = mean - 1.96 * se, # Confidence interval lower bound
+         UB = mean + 1.96 * se) # Upper bound
+```
+
+```{r}
+# Creating the first plot
+
+# Initialize ggplot with the processed data
+ggplot(CO_O3_graph_data,
+       aes(x = month, y = mean, # x-axis: month, y-axis: mean concentration
+           color = Pollutant, # Create separate lines for CO and O3
+           group = Pollutant)) +
+  
+  # Add line connecting monthly averages
+  geom_line(size = 0.5) +
+  
+  # Add points at each monthly average
+  geom_point(size = 1) +
+  
+  # Add error bars representing 95% confidence intervals
+  # Adjust width because default too wide, adjust alpha for transparency
+  geom_errorbar(aes(ymin = LB, ymax = UB),
+                width = 0.2, alpha = 0.7) +
+  
+  # Set palette for bolder colors
+  # Manually label legend entries as "CO" and "O3"
+  scale_color_brewer(palette = "Set1",
+                     labels = c("CO", "O3")) +
+  
+  # Add descriptive labels and title
+  labs(
+    title = "Average Monthly CO & O3 Concentrations (2018-2020)",
+    x = "Month",
+    y = "Concentration (in ppm)",
+    color = "Pollutant"
+  ) +
+  
+  # Custom theme elements
+  theme_minimal() +
+  theme(
+    legend.position = "top", # Move legend above plot for better readability
+    plot.title = element_text(face = "bold",
+                              hjust = 0.5, size = 13) # Center and bold title
+  )
+```
+
+## PM2.5 Plot
+
+```{r}
+# Finding monthly average for last pollutant for each year
+PM_summary <- month_year_summary %>%
+  group_by(year, month) %>%
+  summarise(PM25_mean = mean(mean_PM2.5, na.rm = TRUE))
+```
+
+```{r}
+# Creating second plot
+ggplot(PM_summary,
+       aes(x = month, y = PM25_mean,
+           color = year, group = year)) + # Create separate lines for each year
+  
+  # Add line connecting monthly averages
+  geom_line(size = 0.5) +
+  
+  # Add points at each monthly average
+  geom_point(size = 1) +
+  
+  facet_wrap(~ year, nrow = 3) + # 3 separate rows of plots
+  
+  # Set palette for bolder colors
+  scale_color_brewer(palette = "Set1") +
+  
+  # Add descriptive labels and title
+  labs(
+    title = "Average Monthly PM2.5 Concentrations by Year",
+    x = "Month",
+    y = "Concentration (in ug/m3 LC)",
+    color = "Year"
+  ) +
+  
+  # Custom theme elements
+  theme_minimal() +
+  theme(
+    legend.position = "none", # Remove legend since facet labels show years
+    plot.title = element_text(face = "bold",
+                              hjust = 0.5, size = 13) # Center and bold title
+  )
+```
+
+## Github Link
+
+<https://github.com/sangbo1099/project2>
